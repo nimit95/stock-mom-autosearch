@@ -152,17 +152,24 @@ def get_strategy_picks(send_telegram=True):
 def compute_trades(current_holdings, target_symbols, portfolio_value, kite):
     """
     Compute BUY/SELL orders to rebalance from current to target.
+    Only manages positions tracked in our DB — never touches personal holdings.
     Returns list of order dicts.
     """
+    import database as db
+
     orders = []
 
-    # Stocks to sell (in current but not in target)
-    for sym, qty in current_holdings.items():
+    # Get OUR open positions from DB (not all Kite holdings)
+    our_positions = {p["ticker"]: p for p in db.get_open_positions()}
+
+    # Stocks to sell: in our DB but not in target picks
+    for sym, pos in our_positions.items():
         if sym not in target_symbols:
             orders.append({
                 "action": "SELL",
                 "symbol": sym,
-                "qty": qty,
+                "qty": pos["qty"],
+                "price": pos.get("entry_price", 0),
                 "reason": "not in target",
             })
 
@@ -173,13 +180,20 @@ def compute_trades(current_holdings, target_symbols, portfolio_value, kite):
     per_stock = portfolio_value / len(target_symbols)
 
     # Get current prices via LTP
-    instruments = [f"{EXCHANGE}:{sym}" for sym in target_symbols]
+    all_syms = set(target_symbols) | set(our_positions.keys())
+    instruments = [f"{EXCHANGE}:{sym}" for sym in all_syms]
     try:
         ltps = kite.ltp(instruments)
     except Exception as e:
         print(f"Error fetching LTP: {e}")
-        # Fallback: skip buy orders
         return orders
+
+    # Update sell prices with live LTP
+    for o in orders:
+        key = f"{EXCHANGE}:{o['symbol']}"
+        if key in ltps:
+            o["price"] = ltps[key]["last_price"]
+            o["amount"] = o["qty"] * o["price"]
 
     for sym in target_symbols:
         key = f"{EXCHANGE}:{sym}"
@@ -189,7 +203,9 @@ def compute_trades(current_holdings, target_symbols, portfolio_value, kite):
 
         price = ltps[key]["last_price"]
         target_qty = int(per_stock / price)
-        current_qty = current_holdings.get(sym, 0)
+
+        # Only consider qty from our positions, not personal holdings
+        current_qty = our_positions[sym]["qty"] if sym in our_positions else 0
         diff = target_qty - current_qty
 
         if diff > 0:
