@@ -27,7 +27,7 @@ MA_FAST = 5           # price must be above this MA
 MA_SLOW = 20          # price must be above this MA
 
 # Portfolio
-REBALANCE_EVERY = 3   # trading days
+REBALANCE_EVERY = 5   # trading days (weekly)
 TOP_K = 12            # max stocks to hold
 MIN_STOCKS = 3        # fewer qualifying → 100% cash
 
@@ -61,6 +61,13 @@ def precompute_indicators(data):
             w * ind[f"roc_{p}"] for w, p in zip(ROC_WEIGHTS, ROC_PERIODS)
         )
 
+        # Volume ratio (current vs 20-day avg)
+        if "Volume" in df.columns:
+            vol = df["Volume"]
+            ind["vol_ratio"] = vol / vol.rolling(20).mean()
+        else:
+            ind["vol_ratio"] = 1.0
+
         indicators[ticker] = ind
 
     return indicators
@@ -88,6 +95,10 @@ def screen_stocks(indicators, date):
 
         # Positive recent momentum (1-month ROC > 0)
         if row[f"roc_{ROC_PERIODS[0]}"] <= 0:
+            continue
+
+        # Volume confirmation: recent volume above average
+        if row["vol_ratio"] < 0.8:
             continue
 
         # Minimum score
