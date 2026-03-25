@@ -23,8 +23,8 @@ ROC_PERIODS = [21, 63, 126, 252]      # ~1m, 3m, 6m, 12m
 ROC_WEIGHTS = [0.1, 0.2, 0.3, 0.4]    # favour longer-term momentum
 
 # Trend filters
-MA_FAST = 20          # price must be above this MA
-MA_SLOW = 100         # price must be above this MA
+MA_FAST = 10          # price must be above this MA
+MA_SLOW = 50          # price must be above this MA
 
 # Portfolio
 REBALANCE_EVERY = 5   # trading days (5 = weekly)
