@@ -27,7 +27,7 @@ MA_FAST = 5           # price must be above this MA
 MA_SLOW = 20          # price must be above this MA
 
 # Portfolio
-REBALANCE_EVERY = 5   # trading days (5 = weekly)
+REBALANCE_EVERY = 3   # trading days
 TOP_K = 12            # max stocks to hold
 MIN_STOCKS = 3        # fewer qualifying → 100% cash
 
