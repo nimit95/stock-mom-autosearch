@@ -118,8 +118,12 @@ def get_strategy_picks(send_telegram=True):
     print(f"Nifty vs {REGIME_MA}DMA: {bench_cum.loc[latest]:.3f} vs {bench_ma.loc[latest]:.3f}")
     print()
 
+    import database as db
+
     if not regime_ok:
         print("REGIME FILTER: Go to cash")
+        db.log_rebalance(latest.date(), "bearish", 0, "cash",
+                         float(bench_cum.loc[latest]), float(bench_ma.loc[latest]))
         if send_telegram:
             telegram_bot.send_rebalance_alert(
                 latest, False, [], indicators, get_sector)
@@ -134,7 +138,12 @@ def get_strategy_picks(send_telegram=True):
 
     if len(picks) < MIN_STOCKS:
         print(f"Only {len(picks)} stocks qualify (need {MIN_STOCKS}). Go to cash.")
+        db.log_rebalance(latest.date(), "bullish", len(picks), "cash",
+                         float(bench_cum.loc[latest]), float(bench_ma.loc[latest]))
         return []
+
+    db.log_rebalance(latest.date(), "bullish", len(picks), "invested",
+                     float(bench_cum.loc[latest]), float(bench_ma.loc[latest]))
 
     # Convert to Kite symbols (remove .NS suffix)
     return [t.replace(".NS", "") for t in picks]
@@ -207,7 +216,10 @@ def compute_trades(current_holdings, target_symbols, portfolio_value, kite):
 
 
 def execute_orders(kite, orders, dry_run=False):
-    """Place orders via Kite Connect."""
+    """Place orders via Kite Connect and log to database."""
+    import database as db
+    from datetime import date
+
     if not orders:
         print("No trades needed.")
         return
@@ -218,10 +230,12 @@ def execute_orders(kite, orders, dry_run=False):
 
     sells = [o for o in orders if o["action"] == "SELL"]
     buys = [o for o in orders if o["action"] == "BUY"]
+    today = str(date.today())
 
     # Sell first (free up capital)
     for o in sells:
         print(f"  SELL  {o['symbol']:<15s}  qty={o['qty']:>4d}  ({o['reason']})")
+        order_id = None
         if not dry_run:
             try:
                 order_id = kite.place_order(
@@ -237,9 +251,23 @@ def execute_orders(kite, orders, dry_run=False):
             except Exception as e:
                 print(f"         -> FAILED: {e}")
 
+        price = o.get("price", 0)
+        amount = o.get("amount", o["qty"] * price)
+
+        # Log trade to DB
+        db.log_trade(o["symbol"], "SELL", price, o["qty"], amount,
+                      kite_order_id=str(order_id) if order_id else None)
+
+        # Close position in DB
+        db.close_position(o["symbol"], today, price,
+                          exit_reason=o.get("reason", "rebalance"))
+
     for o in buys:
-        amt_str = f"  ~Rs {o.get('amount', 0):,.0f}" if "amount" in o else ""
-        print(f"  BUY   {o['symbol']:<15s}  qty={o['qty']:>4d}  @ {o.get('price', 0):>8.1f}{amt_str}")
+        price = o.get("price", 0)
+        amount = o.get("amount", o["qty"] * price)
+        amt_str = f"  ~Rs {amount:,.0f}" if amount else ""
+        print(f"  BUY   {o['symbol']:<15s}  qty={o['qty']:>4d}  @ {price:>8.1f}{amt_str}")
+        order_id = None
         if not dry_run:
             try:
                 order_id = kite.place_order(
@@ -254,6 +282,13 @@ def execute_orders(kite, orders, dry_run=False):
                 print(f"         -> Order ID: {order_id}")
             except Exception as e:
                 print(f"         -> FAILED: {e}")
+
+        # Log trade to DB
+        db.log_trade(o["symbol"], "BUY", price, o["qty"], amount,
+                      kite_order_id=str(order_id) if order_id else None)
+
+        # Open position in DB
+        db.open_position(o["symbol"], today, price, o["qty"], amount)
 
     print(f"{'=' * 60}")
     total_sell = sum(o.get("amount", 0) for o in sells)
