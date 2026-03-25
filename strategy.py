@@ -43,10 +43,10 @@ RSI_MIN = 30          # reject oversold (below this)
 RSI_MAX = 70          # reject overbought (above this)
 
 # Regime filter
-REGIME_MA = 200       # go to cash if benchmark below this MA
+REGIME_MA = 150       # go to cash if benchmark below this MA
 
 # Per-stock trailing stop
-STOCK_STOP_PCT = 0.05 # exit stock if it drops 5% from its peak
+STOCK_STOP_PCT = 0.0  # 0 = disabled; >0 = per-stock trailing stop
 
 # ═══════════════════════════════════════════════════════════════
 
