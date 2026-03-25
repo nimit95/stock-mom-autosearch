@@ -97,10 +97,11 @@ def get_current_holdings(kite):
     return current
 
 
-def get_strategy_picks():
+def get_strategy_picks(send_telegram=True):
     """Run momentum strategy, return list of NSE symbols or empty (cash)."""
     import pandas as pd
     import numpy as np
+    import telegram_bot
 
     data = load_data()
     indicators = precompute_indicators(data)
@@ -119,9 +120,18 @@ def get_strategy_picks():
 
     if not regime_ok:
         print("REGIME FILTER: Go to cash")
+        if send_telegram:
+            telegram_bot.send_rebalance_alert(
+                latest, False, [], indicators, get_sector)
         return []
 
     picks = screen_stocks(indicators, latest)
+
+    # Send Telegram alert
+    if send_telegram:
+        telegram_bot.send_rebalance_alert(
+            latest, True, picks, indicators, get_sector)
+
     if len(picks) < MIN_STOCKS:
         print(f"Only {len(picks)} stocks qualify (need {MIN_STOCKS}). Go to cash.")
         return []
