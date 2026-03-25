@@ -29,7 +29,7 @@ MA_SLOW = 200         # price must be above this MA
 # Portfolio
 REBALANCE_EVERY = 5   # trading days (weekly)
 TOP_K = 15            # max stocks to hold
-MIN_STOCKS = 3        # fewer qualifying → 100% cash
+MIN_STOCKS = 5        # fewer qualifying → 100% cash
 
 # Sector filter
 TOP_SECTORS = 3       # pick stocks only from top N sectors by avg momentum
@@ -130,15 +130,26 @@ def screen_stocks(indicators, date):
     return ranked[:TOP_K]
 
 
+REGIME_MA = 200  # go to cash if benchmark below this MA
+
 def run_strategy(data, indicators):
     """Walk through test period, screen weekly, build holdings schedule."""
     bench_dates = data["benchmark_returns"].index
     test_start = pd.Timestamp(TEST_START)
     test_dates = sorted([d for d in bench_dates if d >= test_start])
 
+    # Benchmark cumulative price for regime filter
+    bench_cum = (1 + data["benchmark_returns"]).cumprod()
+    bench_ma = bench_cum.rolling(REGIME_MA).mean()
+
     holdings_schedule = []
     for i, date in enumerate(test_dates):
         if i % REBALANCE_EVERY == 0:
+            # Regime filter: cash if market is bearish
+            if date in bench_cum.index and date in bench_ma.index:
+                if bench_cum.loc[date] < bench_ma.loc[date]:
+                    holdings_schedule.append((date, []))
+                    continue
             picks = screen_stocks(indicators, date)
             holdings_schedule.append((date, picks))
 
