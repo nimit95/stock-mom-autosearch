@@ -2,7 +2,8 @@
 rebalance.py - Weekly rebalance via Kite Connect API.
 
 Setup:
-  1. Get API key/secret from https://developers.kite.trade
+  1. Get free personal API key from https://developers.kite.trade
+     (Execution APIs are free — no subscription needed)
   2. Copy .env.example to .env and fill in credentials
   3. Run: python rebalance.py --login   (first time / daily)
   4. Run: python rebalance.py           (execute rebalance)
