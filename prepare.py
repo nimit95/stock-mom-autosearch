@@ -431,10 +431,17 @@ def evaluate_strategy(holdings_schedule, data):
     total_holdings_count = 0
     num_rebalances = 0
 
+    pending_holdings = None
+
     for date in test_dates:
-        # Check if we need to update holdings
+        # Apply pending holdings from previous rebalance (1-day delay)
+        if pending_holdings is not None:
+            current_holdings = pending_holdings
+            pending_holdings = None
+
+        # Check if we rebalance today — takes effect NEXT trading day
         while sched_idx < len(schedule) and schedule[sched_idx][0] <= date:
-            current_holdings = schedule[sched_idx][1]
+            pending_holdings = schedule[sched_idx][1]
             sched_idx += 1
             num_rebalances += 1
 
