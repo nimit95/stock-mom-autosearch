@@ -20,7 +20,7 @@ from prepare import (
 
 # Momentum lookbacks (trading days) and weights
 ROC_PERIODS = [21, 63, 126, 252]      # ~1m, 3m, 6m, 12m
-ROC_WEIGHTS = [0.1, 0.2, 0.3, 0.4]    # favour longer-term momentum
+ROC_WEIGHTS = [0.05, 0.15, 0.3, 0.5]  # heavy 12m weight
 
 # Trend filters
 MA_FAST = 50          # price must be above this MA
