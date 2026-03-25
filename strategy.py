@@ -29,7 +29,7 @@ MA_SLOW = 200         # price must be above this MA
 # Portfolio
 REBALANCE_EVERY = 5   # trading days (weekly)
 TOP_K = 15            # max stocks to hold
-MIN_STOCKS = 5        # fewer qualifying → 100% cash
+MIN_STOCKS = 7        # fewer qualifying → 100% cash
 
 # Sector filter
 TOP_SECTORS = 3       # pick stocks only from top N sectors by avg momentum
