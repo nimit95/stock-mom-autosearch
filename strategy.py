@@ -98,7 +98,7 @@ def screen_stocks(indicators, date):
             continue
 
         # Volume confirmation: recent volume above average
-        if row["vol_ratio"] < 1.5:
+        if row["vol_ratio"] < 2.0:
             continue
 
         # Minimum score
