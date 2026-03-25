@@ -23,16 +23,16 @@ ROC_PERIODS = [21, 63, 126, 252]      # ~1m, 3m, 6m, 12m
 ROC_WEIGHTS = [0.1, 0.2, 0.3, 0.4]    # favour longer-term momentum
 
 # Trend filters
-MA_FAST = 5           # price must be above this MA
-MA_SLOW = 20          # price must be above this MA
+MA_FAST = 50          # price must be above this MA
+MA_SLOW = 200         # price must be above this MA
 
 # Portfolio
 REBALANCE_EVERY = 5   # trading days (weekly)
-TOP_K = 12            # max stocks to hold
+TOP_K = 15            # max stocks to hold
 MIN_STOCKS = 3        # fewer qualifying → 100% cash
 
 # Sector filter
-TOP_SECTORS = 4       # pick stocks only from top N sectors by avg momentum
+TOP_SECTORS = 5       # pick stocks only from top N sectors by avg momentum
 
 # Momentum threshold
 MIN_MOM_SCORE = 0.0   # minimum composite score to qualify
@@ -61,13 +61,6 @@ def precompute_indicators(data):
             w * ind[f"roc_{p}"] for w, p in zip(ROC_WEIGHTS, ROC_PERIODS)
         )
 
-        # Volume ratio (current vs 20-day avg)
-        if "Volume" in df.columns:
-            vol = df["Volume"]
-            ind["vol_ratio"] = vol / vol.rolling(20).mean()
-        else:
-            ind["vol_ratio"] = 1.0
-
         indicators[ticker] = ind
 
     return indicators
@@ -95,10 +88,6 @@ def screen_stocks(indicators, date):
 
         # Positive recent momentum (1-month ROC > 0)
         if row[f"roc_{ROC_PERIODS[0]}"] <= 0:
-            continue
-
-        # Volume confirmation: recent volume above average
-        if row["vol_ratio"] < 2.0:
             continue
 
         # Minimum score
