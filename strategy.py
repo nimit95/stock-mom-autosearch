@@ -32,7 +32,7 @@ TOP_K = 15            # max stocks to hold
 MIN_STOCKS = 3        # fewer qualifying → 100% cash
 
 # Sector filter
-TOP_SECTORS = 5       # pick stocks only from top N sectors by avg momentum
+TOP_SECTORS = 3       # pick stocks only from top N sectors by avg momentum
 
 # Momentum threshold
 MIN_MOM_SCORE = 0.0   # minimum composite score to qualify
