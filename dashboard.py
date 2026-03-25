@@ -16,23 +16,30 @@ import database as db
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
+    PREFIX = "/india"
+
     def do_GET(self):
-        if self.path == "/" or self.path == "/dashboard":
+        path = self.path
+        # Strip prefix for routing
+        if path.startswith(self.PREFIX):
+            path = path[len(self.PREFIX):] or "/"
+
+        if path == "/" or path == "/dashboard":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(generate_html().encode())
-        elif self.path == "/api/stats":
+        elif path == "/api/stats":
             self.send_json(db.get_trading_stats())
-        elif self.path == "/api/positions/open":
+        elif path == "/api/positions/open":
             self.send_json(db.get_open_positions())
-        elif self.path == "/api/positions/closed":
+        elif path == "/api/positions/closed":
             self.send_json(db.get_closed_positions())
-        elif self.path == "/api/trades":
+        elif path == "/api/trades":
             self.send_json(db.get_recent_trades())
-        elif self.path == "/api/rebalances":
+        elif path == "/api/rebalances":
             self.send_json(db.get_rebalance_history())
-        elif self.path == "/api/monthly":
+        elif path == "/api/monthly":
             self.send_json(db.get_monthly_pnl())
         else:
             self.send_response(404)
