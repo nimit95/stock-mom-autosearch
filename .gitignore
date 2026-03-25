@@ -4,3 +4,7 @@ run.log
 .venv/
 .env
 .kite_token
+momentum.db
+watchdog.log
+rebalance.log
+ind_nifty500list.csv

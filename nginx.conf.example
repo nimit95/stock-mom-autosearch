@@ -1,0 +1,13 @@
+# Nginx config for trading.nimitaggarwal.com
+# Place in /etc/nginx/sites-available/trading and symlink to sites-enabled
+
+server {
+    listen 80;
+    server_name trading.nimitaggarwal.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
