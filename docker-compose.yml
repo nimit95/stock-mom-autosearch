@@ -2,13 +2,13 @@ services:
   dashboard:
     build: .
     ports:
-      - "8765:8765"
+      - "8766:8766"
     volumes:
       - ./data:/app/data
       - mom-cache:/root/.cache/mom-autosearch
       - ./.env:/app/.env:ro
     restart: unless-stopped
-    command: python3 dashboard.py
+    command: python3 dashboard.py --port 8766
 
   # Weekly rebalance - run manually or via cron on host:
   #   docker compose run --rm rebalance python3 rebalance.py --dry-run
