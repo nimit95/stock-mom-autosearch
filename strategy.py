@@ -37,6 +37,11 @@ TOP_SECTORS = 3       # pick stocks only from top N sectors by avg momentum
 # Momentum threshold
 MIN_MOM_SCORE = 0.0   # minimum composite score to qualify
 
+# RSI filter
+RSI_PERIOD = 14       # RSI lookback
+RSI_MIN = 30          # reject oversold (below this)
+RSI_MAX = 70          # reject overbought (above this)
+
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -67,6 +72,13 @@ def precompute_indicators(data):
 
         # Relative strength vs benchmark (6m)
         ind["bench_roc_126"] = bench_roc_126.reindex(ind.index)
+
+        # RSI
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(RSI_PERIOD).mean()
+        loss = (-delta.clip(upper=0)).rolling(RSI_PERIOD).mean()
+        rs = gain / loss.clip(lower=1e-10)
+        ind["rsi"] = 100 - (100 / (1 + rs))
 
         indicators[ticker] = ind
 
@@ -101,6 +113,11 @@ def screen_stocks(indicators, date):
         if not np.isnan(row["bench_roc_126"]) and row["roc_126"] <= row["bench_roc_126"]:
             continue
 
+        # RSI filter: avoid oversold and overbought
+        rsi = row["rsi"]
+        if not np.isnan(rsi) and (rsi < RSI_MIN or rsi > RSI_MAX):
+            continue
+
         # Minimum score
         if row["mom_score"] <= MIN_MOM_SCORE:
             continue
@@ -130,7 +147,7 @@ def screen_stocks(indicators, date):
     return ranked[:TOP_K]
 
 
-REGIME_MA = 200  # go to cash if benchmark below this MA
+REGIME_MA = 150  # go to cash if benchmark below this MA
 
 def run_strategy(data, indicators):
     """Walk through test period, screen weekly, build holdings schedule."""
