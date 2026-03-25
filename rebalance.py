@@ -325,6 +325,9 @@ def main():
         login()
         return
 
+    import database as db_mod
+    import telegram_bot
+
     # 1. Get strategy picks
     print("Running momentum strategy...")
     target_symbols = get_strategy_picks()
@@ -346,6 +349,29 @@ def main():
 
     # 5. Execute
     execute_orders(kite, orders, dry_run=args.dry_run)
+
+    # 6. Send status to Telegram
+    stats = db_mod.get_trading_stats()
+    open_pos = db_mod.get_open_positions()
+    mode = "DRY RUN" if args.dry_run else "LIVE"
+
+    status_lines = [f"<b>REBALANCE STATUS ({mode})</b>", ""]
+
+    if open_pos:
+        status_lines.append(f"Open positions: {len(open_pos)}")
+        for p in open_pos:
+            sym = p['ticker'].replace('.NS', '')
+            status_lines.append(f"  {sym}  qty={p['qty']}  entry=₹{p['entry_price']:.0f}")
+    else:
+        status_lines.append("Open positions: 0 (CASH)")
+
+    status_lines.append("")
+    status_lines.append(f"Closed trades: {stats['closed_positions']}")
+    status_lines.append(f"Win rate: {stats['win_rate']}%")
+    status_lines.append(f"Total P&L: ₹{stats['total_pnl']:+,.0f}")
+    status_lines.append(f"Rebalances: {stats['total_rebalances']}")
+
+    telegram_bot.send_message("\n".join(status_lines))
 
 
 if __name__ == "__main__":
