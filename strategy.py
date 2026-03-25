@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 from prepare import (
-    load_data, evaluate_strategy, print_results,
-    get_sector, TEST_START, UNIVERSE,
+    load_data, print_results,
+    get_sector, TEST_START, RISK_FREE_RATE,
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -42,12 +42,17 @@ RSI_PERIOD = 14       # RSI lookback
 RSI_MIN = 30          # reject oversold (below this)
 RSI_MAX = 70          # reject overbought (above this)
 
+# Regime filter
+REGIME_MA = 150       # go to cash if benchmark below this MA
+
+# Per-stock trailing stop
+STOCK_STOP_PCT = 0.10 # exit stock if it drops 10% from its peak
+
 # ═══════════════════════════════════════════════════════════════
 
 
 def precompute_indicators(data):
     """Compute momentum indicators for every stock. Returns dict of DataFrames."""
-    # Benchmark ROC for dual momentum
     bench_cum = (1 + data["benchmark_returns"]).cumprod()
     bench_roc_126 = bench_cum.pct_change(126)
 
@@ -57,23 +62,18 @@ def precompute_indicators(data):
         ind = pd.DataFrame(index=df.index)
         ind["close"] = close
 
-        # Rate of change at each lookback
         for p in ROC_PERIODS:
             ind[f"roc_{p}"] = close.pct_change(p)
 
-        # Moving averages
         ind["ma_fast"] = close.rolling(MA_FAST).mean()
         ind["ma_slow"] = close.rolling(MA_SLOW).mean()
 
-        # Composite momentum score (weighted sum of ROCs)
         ind["mom_score"] = sum(
             w * ind[f"roc_{p}"] for w, p in zip(ROC_WEIGHTS, ROC_PERIODS)
         )
 
-        # Relative strength vs benchmark (6m)
         ind["bench_roc_126"] = bench_roc_126.reindex(ind.index)
 
-        # RSI
         delta = close.diff()
         gain = delta.clip(lower=0).rolling(RSI_PERIOD).mean()
         loss = (-delta.clip(upper=0)).rolling(RSI_PERIOD).mean()
@@ -86,10 +86,7 @@ def precompute_indicators(data):
 
 
 def screen_stocks(indicators, date):
-    """
-    On a given date, return list of tickers to hold (ranked by momentum).
-    Returns empty list if fewer than MIN_STOCKS qualify → cash signal.
-    """
+    """Screen stocks on a given date. Returns ranked list of tickers."""
     scores = {}
 
     for ticker, ind in indicators.items():
@@ -97,28 +94,17 @@ def screen_stocks(indicators, date):
             continue
         row = ind.loc[date]
 
-        # Skip incomplete data
         if row.isna().any():
             continue
-
-        # Trend filter: price above both MAs
         if row["close"] <= row["ma_fast"] or row["close"] <= row["ma_slow"]:
             continue
-
-        # Positive recent momentum (1-month ROC > 0)
         if row[f"roc_{ROC_PERIODS[0]}"] <= 0:
             continue
-
-        # Dual momentum: stock 6m ROC must beat benchmark 6m ROC
         if not np.isnan(row["bench_roc_126"]) and row["roc_126"] <= row["bench_roc_126"]:
             continue
-
-        # RSI filter: avoid oversold and overbought
         rsi = row["rsi"]
         if not np.isnan(rsi) and (rsi < RSI_MIN or rsi > RSI_MAX):
             continue
-
-        # Minimum score
         if row["mom_score"] <= MIN_MOM_SCORE:
             continue
 
@@ -127,7 +113,6 @@ def screen_stocks(indicators, date):
     if not scores:
         return []
 
-    # Sector filter: average momentum per sector, keep top N
     sector_scores = {}
     for ticker, score in scores.items():
         sec = get_sector(ticker)
@@ -142,35 +127,151 @@ def screen_stocks(indicators, date):
     if len(filtered) < MIN_STOCKS:
         return []
 
-    # Rank by momentum score, pick top K
     ranked = sorted(filtered, key=filtered.get, reverse=True)
     return ranked[:TOP_K]
 
 
-REGIME_MA = 150  # go to cash if benchmark below this MA
+def run_backtest(data, indicators):
+    """
+    Full backtest with per-stock trailing stop.
+    Returns metrics dict compatible with print_results.
+    """
+    stock_returns = data["stock_returns"]
+    stocks = data["stocks"]
+    bench_ret = data["benchmark_returns"]
+    bench_cum = (1 + bench_ret).cumprod()
+    bench_ma = bench_cum.rolling(REGIME_MA).mean()
 
-def run_strategy(data, indicators):
-    """Walk through test period, screen weekly, build holdings schedule."""
-    bench_dates = data["benchmark_returns"].index
+    bench_dates = bench_ret.index
     test_start = pd.Timestamp(TEST_START)
     test_dates = sorted([d for d in bench_dates if d >= test_start])
 
-    # Benchmark cumulative price for regime filter
-    bench_cum = (1 + data["benchmark_returns"]).cumprod()
-    bench_ma = bench_cum.rolling(REGIME_MA).mean()
+    risk_free_daily = RISK_FREE_RATE / 252
 
-    holdings_schedule = []
+    # State
+    current_holdings = []     # list of tickers
+    pending_holdings = None   # set on rebalance, applied next day
+    stock_peaks = {}          # {ticker: peak_close_since_entry}
+    stopped_stocks = set()    # tickers stopped out this holding period
+
+    portfolio_returns = []
+    ret_dates = []
+    cash_days = 0
+    total_holdings_count = 0
+    num_rebalances = 0
+    rebal_idx = 0
+
     for i, date in enumerate(test_dates):
+        # Apply pending holdings from previous rebalance day
+        if pending_holdings is not None:
+            current_holdings = list(pending_holdings)
+            pending_holdings = None
+            stock_peaks = {}
+            stopped_stocks = set()
+            # Initialize peaks at entry
+            for t in current_holdings:
+                if t in stocks and date in stocks[t].index:
+                    stock_peaks[t] = stocks[t].loc[date, "Close"]
+
+        # Check for rebalance
         if i % REBALANCE_EVERY == 0:
-            # Regime filter: cash if market is bearish
+            # Regime filter
             if date in bench_cum.index and date in bench_ma.index:
                 if bench_cum.loc[date] < bench_ma.loc[date]:
-                    holdings_schedule.append((date, []))
-                    continue
-            picks = screen_stocks(indicators, date)
-            holdings_schedule.append((date, picks))
+                    pending_holdings = []
+                    num_rebalances += 1
+                else:
+                    picks = screen_stocks(indicators, date)
+                    pending_holdings = picks
+                    num_rebalances += 1
+            else:
+                picks = screen_stocks(indicators, date)
+                pending_holdings = picks
+                num_rebalances += 1
 
-    return holdings_schedule
+        # Per-stock trailing stop: update peaks, check stops
+        if STOCK_STOP_PCT > 0:
+            for t in current_holdings:
+                if t in stopped_stocks:
+                    continue
+                if t in stocks and date in stocks[t].index:
+                    price = stocks[t].loc[date, "Close"]
+                    if t in stock_peaks:
+                        stock_peaks[t] = max(stock_peaks[t], price)
+                        if price < stock_peaks[t] * (1 - STOCK_STOP_PCT):
+                            stopped_stocks.add(t)
+                    else:
+                        stock_peaks[t] = price
+
+        # Active holdings (exclude stopped stocks)
+        active = [t for t in current_holdings if t not in stopped_stocks]
+
+        # Compute daily return
+        if not active:
+            portfolio_returns.append(risk_free_daily)
+            cash_days += 1
+        else:
+            rets = []
+            for t in active:
+                if t in stock_returns and date in stock_returns[t].index:
+                    r = stock_returns[t].loc[date]
+                    if not np.isnan(r):
+                        rets.append(r)
+            if rets:
+                # Stopped slots earn risk-free
+                n_active = len(rets)
+                n_stopped = len(stopped_stocks)
+                n_total = n_active + n_stopped
+                if n_total > 0 and n_stopped > 0:
+                    daily_ret = (sum(rets) + n_stopped * risk_free_daily) / n_total
+                else:
+                    daily_ret = np.mean(rets)
+                portfolio_returns.append(daily_ret)
+                total_holdings_count += n_active
+            else:
+                portfolio_returns.append(risk_free_daily)
+                cash_days += 1
+
+        ret_dates.append(date)
+
+    # Compute metrics
+    port = pd.Series(portfolio_returns, index=pd.DatetimeIndex(ret_dates))
+    bench_aligned = bench_ret.reindex(port.index).fillna(0)
+
+    excess = port - risk_free_daily
+    sharpe = (excess.mean() / excess.std()) * np.sqrt(252) if excess.std() > 0 else 0.0
+
+    total_return = ((1 + port).prod() - 1) * 100
+    bench_prod = (1 + bench_aligned).prod()
+    if hasattr(bench_prod, "__len__"):
+        bench_prod = float(bench_prod.iloc[0]) if len(bench_prod) > 0 else 1.0
+    bench_return = (float(bench_prod) - 1) * 100
+
+    cum = (1 + port).cumprod()
+    running_max = cum.cummax()
+    dd = (cum - running_max) / running_max
+    max_dd = abs(dd.min()) * 100
+
+    win_rate = (port > 0).mean() * 100
+    non_cash_days = len(port) - cash_days
+    avg_holdings = total_holdings_count / non_cash_days if non_cash_days > 0 else 0
+
+    monthly = port.resample("ME").apply(lambda x: (1 + x).prod() - 1)
+
+    return {
+        "sharpe_ratio": round(float(sharpe), 4),
+        "total_return_pct": round(float(total_return), 1),
+        "benchmark_return_pct": round(float(bench_return), 1),
+        "alpha_pct": round(float(total_return - bench_return), 1),
+        "max_drawdown_pct": round(float(max_dd), 1),
+        "win_rate_pct": round(float(win_rate), 1),
+        "avg_holdings": round(float(avg_holdings), 1),
+        "cash_pct": round(float(cash_days / len(port) * 100), 1),
+        "num_rebalances": num_rebalances,
+        "trading_days": len(port),
+        "best_month_pct": round(float(monthly.max() * 100), 1) if len(monthly) > 0 else 0,
+        "worst_month_pct": round(float(monthly.min() * 100), 1) if len(monthly) > 0 else 0,
+    }
 
 
 def main():
@@ -182,16 +283,8 @@ def main():
     print("Computing momentum indicators...")
     indicators = precompute_indicators(data)
 
-    print("Running weekly momentum screen...")
-    holdings = run_strategy(data, indicators)
-
-    # Stats
-    filled = sum(1 for _, h in holdings if h)
-    empty = sum(1 for _, h in holdings if not h)
-    print(f"  {len(holdings)} rebalances: {filled} invested, {empty} cash")
-
-    print("Backtesting...")
-    metrics = evaluate_strategy(holdings, data)
+    print("Running backtest with per-stock trailing stop...")
+    metrics = run_backtest(data, indicators)
 
     elapsed = time.time() - t0
     print_results(metrics, elapsed)
