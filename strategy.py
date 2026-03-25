@@ -46,7 +46,7 @@ RSI_MAX = 70          # reject overbought (above this)
 REGIME_MA = 150       # go to cash if benchmark below this MA
 
 # Per-stock trailing stop
-STOCK_STOP_PCT = 0.08 # exit stock if it drops 8% from its peak
+STOCK_STOP_PCT = 0.07 # exit stock if it drops 7% from its peak
 
 # ═══════════════════════════════════════════════════════════════
 
