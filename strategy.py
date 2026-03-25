@@ -42,6 +42,10 @@ MIN_MOM_SCORE = 0.0   # minimum composite score to qualify
 
 def precompute_indicators(data):
     """Compute momentum indicators for every stock. Returns dict of DataFrames."""
+    # Benchmark ROC for dual momentum
+    bench_cum = (1 + data["benchmark_returns"]).cumprod()
+    bench_roc_126 = bench_cum.pct_change(126)
+
     indicators = {}
     for ticker, df in data["stocks"].items():
         close = df["Close"]
@@ -60,6 +64,9 @@ def precompute_indicators(data):
         ind["mom_score"] = sum(
             w * ind[f"roc_{p}"] for w, p in zip(ROC_WEIGHTS, ROC_PERIODS)
         )
+
+        # Relative strength vs benchmark (6m)
+        ind["bench_roc_126"] = bench_roc_126.reindex(ind.index)
 
         indicators[ticker] = ind
 
@@ -88,6 +95,10 @@ def screen_stocks(indicators, date):
 
         # Positive recent momentum (1-month ROC > 0)
         if row[f"roc_{ROC_PERIODS[0]}"] <= 0:
+            continue
+
+        # Dual momentum: stock 6m ROC must beat benchmark 6m ROC
+        if not np.isnan(row["bench_roc_126"]) and row["roc_126"] <= row["bench_roc_126"]:
             continue
 
         # Minimum score
