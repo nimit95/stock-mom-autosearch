@@ -28,7 +28,7 @@ MA_SLOW = 20          # price must be above this MA
 
 # Portfolio
 REBALANCE_EVERY = 5   # trading days (5 = weekly)
-TOP_K = 15            # max stocks to hold
+TOP_K = 12            # max stocks to hold
 MIN_STOCKS = 3        # fewer qualifying → 100% cash
 
 # Sector filter
