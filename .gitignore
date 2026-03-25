@@ -5,6 +5,7 @@ run.log
 .env
 .kite_token
 momentum.db
+data/
 watchdog.log
 rebalance.log
 ind_nifty500list.csv
