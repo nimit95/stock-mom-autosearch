@@ -18,7 +18,7 @@ ssh $SERVER << 'EOF'
 
     # Clone if first time
     if [ ! -d "stock-mom-autosearch" ]; then
-        git clone https://github.com/nimit/stock-mom-autosearch.git
+        git clone https://github.com/nimit95/stock-mom-autosearch.git
         cd stock-mom-autosearch
         git checkout autoresearch/mar25
         python3 -m venv .venv
