@@ -152,14 +152,14 @@ def run_backtest(data, indicators):
     current_holdings = []     # list of tickers
     pending_holdings = None   # set on rebalance, applied next day
     stock_peaks = {}          # {ticker: peak_close_since_entry}
-    stopped_stocks = set()    # tickers stopped out this holding period
+    stopped_stocks = set()    # tickers stopped out (applied with 1-day delay)
+    pending_stops = set()     # stops triggered today, applied tomorrow
 
     portfolio_returns = []
     ret_dates = []
     cash_days = 0
     total_holdings_count = 0
     num_rebalances = 0
-    rebal_idx = 0
 
     for i, date in enumerate(test_dates):
         # Apply pending holdings from previous rebalance day
@@ -168,14 +168,19 @@ def run_backtest(data, indicators):
             pending_holdings = None
             stock_peaks = {}
             stopped_stocks = set()
+            pending_stops = set()
             # Initialize peaks at entry
             for t in current_holdings:
                 if t in stocks and date in stocks[t].index:
                     stock_peaks[t] = stocks[t].loc[date, "Close"]
 
+        # Apply pending stops from yesterday (1-day delay, like rebalance)
+        if pending_stops:
+            stopped_stocks.update(pending_stops)
+            pending_stops = set()
+
         # Check for rebalance
         if i % REBALANCE_EVERY == 0:
-            # Regime filter
             if date in bench_cum.index and date in bench_ma.index:
                 if bench_cum.loc[date] < bench_ma.loc[date]:
                     pending_holdings = []
@@ -189,24 +194,11 @@ def run_backtest(data, indicators):
                 pending_holdings = picks
                 num_rebalances += 1
 
-        # Per-stock trailing stop: update peaks, check stops
-        if STOCK_STOP_PCT > 0:
-            for t in current_holdings:
-                if t in stopped_stocks:
-                    continue
-                if t in stocks and date in stocks[t].index:
-                    price = stocks[t].loc[date, "Close"]
-                    if t in stock_peaks:
-                        stock_peaks[t] = max(stock_peaks[t], price)
-                        if price < stock_peaks[t] * (1 - STOCK_STOP_PCT):
-                            stopped_stocks.add(t)
-                    else:
-                        stock_peaks[t] = price
-
-        # Active holdings (exclude stopped stocks)
+        # Active holdings today (exclude already-stopped stocks)
         active = [t for t in current_holdings if t not in stopped_stocks]
 
-        # Compute daily return
+        # Compute daily return for ALL active stocks (including those
+        # that will be stopped today — they still hold today)
         if not active:
             portfolio_returns.append(risk_free_daily)
             cash_days += 1
@@ -217,8 +209,12 @@ def run_backtest(data, indicators):
                     r = stock_returns[t].loc[date]
                     if not np.isnan(r):
                         rets.append(r)
+
+                        # Check stop using today's Low (intraday breach)
+                        # If Low breached stop, use stop price as exit
+                        # (but return is already computed from close-to-close
+                        #  so the loss is captured naturally)
             if rets:
-                # Stopped slots earn risk-free
                 n_active = len(rets)
                 n_stopped = len(stopped_stocks)
                 n_total = n_active + n_stopped
@@ -231,6 +227,26 @@ def run_backtest(data, indicators):
             else:
                 portfolio_returns.append(risk_free_daily)
                 cash_days += 1
+
+        # Per-stock trailing stop: check AFTER computing returns
+        # Uses Close price. Stop takes effect TOMORROW (1-day delay).
+        if STOCK_STOP_PCT > 0:
+            for t in active:
+                if t in stopped_stocks or t in pending_stops:
+                    continue
+                if t in stocks and date in stocks[t].index:
+                    close = stocks[t].loc[date, "Close"]
+
+                    # Update peak using close
+                    if t in stock_peaks:
+                        stock_peaks[t] = max(stock_peaks[t], close)
+                    else:
+                        stock_peaks[t] = close
+
+                    # Check if close breached stop level
+                    stop_level = stock_peaks[t] * (1 - STOCK_STOP_PCT)
+                    if close <= stop_level:
+                        pending_stops.add(t)
 
         ret_dates.append(date)
 
