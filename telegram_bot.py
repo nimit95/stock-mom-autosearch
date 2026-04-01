@@ -50,37 +50,73 @@ def send_message(text, parse_mode="HTML"):
         return False
 
 
-def send_rebalance_alert(date, regime_ok, picks, indicators, get_sector_fn):
-    """Send weekly rebalance notification."""
+def send_rebalance_alert(date, regime_ok, picks, indicators, get_sector_fn,
+                         portfolio_value=1_000_000):
+    """Send weekly rebalance notification with quantities."""
+    import database as db
+
     lines = [f"<b>MOMENTUM REBALANCE — {date}</b>"]
     lines.append("")
+
+    # Check existing positions to compute sells
+    open_pos = db.get_open_positions()
+    open_tickers = {p["ticker"].replace(".NS", "") for p in open_pos}
 
     if not regime_ok:
         lines.append("Regime: BEARISH (Nifty below 150 DMA)")
         lines.append("")
         lines.append("Action: <b>100% CASH</b>")
-        lines.append("Sell all holdings.")
+        if open_pos:
+            lines.append("")
+            lines.append("<b>SELL:</b>")
+            for p in open_pos:
+                sym = p["ticker"].replace(".NS", "")
+                lines.append(f"  {sym}  qty={p['qty']}  entry=₹{p['entry_price']:.0f}")
+        else:
+            lines.append("No positions to sell.")
     elif not picks:
         lines.append("Regime: BULLISH")
         lines.append("But fewer than 7 stocks qualify.")
         lines.append("")
         lines.append("Action: <b>100% CASH</b>")
+        if open_pos:
+            lines.append("")
+            lines.append("<b>SELL:</b>")
+            for p in open_pos:
+                sym = p["ticker"].replace(".NS", "")
+                lines.append(f"  {sym}  qty={p['qty']}  entry=₹{p['entry_price']:.0f}")
     else:
+        pick_syms = [t.replace(".NS", "") for t in picks]
+        per_stock = portfolio_value / len(picks)
+
         lines.append(f"Regime: BULLISH")
         lines.append(f"Action: <b>BUY {len(picks)} stocks</b> (equal weight)")
+        lines.append(f"~₹{per_stock:,.0f} per stock")
         lines.append("")
 
+        # Sells: positions not in new picks
+        sells = [p for p in open_pos if p["ticker"].replace(".NS", "") not in pick_syms]
+        if sells:
+            lines.append("<b>SELL:</b>")
+            for p in sells:
+                sym = p["ticker"].replace(".NS", "")
+                lines.append(f"  {sym}  qty={p['qty']}  entry=₹{p['entry_price']:.0f}")
+            lines.append("")
+
+        # Buys with approximate quantities
+        lines.append("<b>BUY:</b>")
         for i, t in enumerate(picks, 1):
             sym = t.replace(".NS", "")
             sec = get_sector_fn(t)
             if t in indicators and date in indicators[t].index:
                 row = indicators[t].loc[date]
                 price = row["close"]
+                approx_qty = int(per_stock / price)
                 score = row["mom_score"]
                 rsi = row["rsi"]
                 lines.append(
                     f"{i:2d}. <b>{sym}</b>  {sec}"
-                    f"\n    ₹{price:.0f}  score={score:.3f}  RSI={rsi:.0f}"
+                    f"\n    ₹{price:.0f}  ~qty={approx_qty}  score={score:.3f}  RSI={rsi:.0f}"
                 )
             else:
                 lines.append(f"{i:2d}. <b>{sym}</b>  {sec}")
