@@ -333,6 +333,70 @@ def _flatten_columns(df):
     return df
 
 
+def _cache_last_date(data):
+    """Get the latest date in cached data."""
+    dates = []
+    if "benchmark" in data and len(data["benchmark"]) > 0:
+        dates.append(data["benchmark"].index[-1])
+    for df in data.get("stocks", {}).values():
+        if len(df) > 0:
+            dates.append(df.index[-1])
+            break  # one stock is enough to check
+    return max(dates) if dates else None
+
+
+def _update_cache(data, cache_file):
+    """Download delta (new data since last cache date) and append."""
+    last_date = _cache_last_date(data)
+    if last_date is None:
+        return data
+
+    today = pd.Timestamp.now().normalize()
+    if last_date.normalize() >= today - pd.Timedelta(days=1):
+        print(f"Cache is fresh (last date: {last_date.date()})")
+        return data
+
+    # Fetch from day after last cached date
+    start = (last_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    print(f"Cache stale (last: {last_date.date()}). Fetching delta from {start}...")
+
+    updated = 0
+    failed = 0
+    all_tickers = list(data["stocks"].keys())
+
+    for ticker in all_tickers:
+        try:
+            df_new = yf.download(ticker, start=start, progress=False)
+            df_new = _flatten_columns(df_new)
+            if len(df_new) > 0:
+                data["stocks"][ticker] = pd.concat([data["stocks"][ticker], df_new])
+                data["stocks"][ticker] = data["stocks"][ticker][
+                    ~data["stocks"][ticker].index.duplicated(keep="last")
+                ]
+                updated += 1
+        except Exception:
+            failed += 1
+
+    # Update benchmark
+    try:
+        bench_new = yf.download(BENCHMARK_TICKER, start=start, progress=False)
+        bench_new = _flatten_columns(bench_new)
+        if len(bench_new) > 0:
+            data["benchmark"] = pd.concat([data["benchmark"], bench_new])
+            data["benchmark"] = data["benchmark"][
+                ~data["benchmark"].index.duplicated(keep="last")
+            ]
+    except Exception:
+        print(f"  Warning: failed to update benchmark")
+
+    with open(cache_file, "wb") as f:
+        pickle.dump(data, f)
+
+    new_last = _cache_last_date(data)
+    print(f"Updated {updated} stocks ({failed} failed). Last date: {new_last.date()}")
+    return data
+
+
 def fetch_data():
     """Download OHLCV for universe + benchmark. Cache to disk."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -341,7 +405,8 @@ def fetch_data():
     if cache_file.exists():
         print(f"Loading cached data from {cache_file}")
         with open(cache_file, "rb") as f:
-            return pickle.load(f)
+            data = pickle.load(f)
+        return _update_cache(data, cache_file)
 
     print("Fetching data from Yahoo Finance...")
     all_data = {}
@@ -350,7 +415,7 @@ def fetch_data():
 
     for ticker in all_tickers:
         try:
-            df = yf.download(ticker, start=DATA_START, end=TEST_END, progress=False)
+            df = yf.download(ticker, start=DATA_START, progress=False)
             df = _flatten_columns(df)
             if len(df) >= 252:
                 all_data[ticker] = df
@@ -363,7 +428,7 @@ def fetch_data():
             print(f"  FAIL: {ticker} ({e})")
 
     print(f"Fetching benchmark {BENCHMARK_TICKER}...")
-    benchmark = yf.download(BENCHMARK_TICKER, start=DATA_START, end=TEST_END, progress=False)
+    benchmark = yf.download(BENCHMARK_TICKER, start=DATA_START, progress=False)
     benchmark = _flatten_columns(benchmark)
 
     data = {"stocks": all_data, "benchmark": benchmark}

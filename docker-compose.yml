@@ -9,6 +9,11 @@ services:
       - ./.env:/app/.env:ro
     restart: unless-stopped
     command: python3 dashboard.py --port 8766
+    networks:
+      default:
+      stock_strat_mom_rsi_default:
+        aliases:
+          - dashboard
 
   # Weekly rebalance - run manually or via cron on host:
   #   docker compose run --rm rebalance python3 rebalance.py --dry-run
@@ -21,6 +26,10 @@ services:
       - ./.kite_token:/app/.kite_token
     profiles: ["cli"]
     command: python3 rebalance.py --dry-run
+
+networks:
+  stock_strat_mom_rsi_default:
+    external: true
 
 volumes:
   mom-cache:

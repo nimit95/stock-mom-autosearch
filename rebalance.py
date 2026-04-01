@@ -332,16 +332,23 @@ def main():
     print("Running momentum strategy...")
     target_symbols = get_strategy_picks()
 
-    # 2. Connect to Kite
-    print("\nConnecting to Kite...")
-    kite = get_kite()
-
-    # 3. Get current holdings
-    current = get_current_holdings(kite)
-    print(f"Current holdings: {len(current)} stocks")
-    if current:
-        for sym, qty in sorted(current.items()):
-            print(f"  {sym}: {qty}")
+    # 2. Connect to Kite (skip in dry-run if no token)
+    kite = None
+    current = {}
+    if not args.dry_run:
+        print("\nConnecting to Kite...")
+        kite = get_kite()
+        # 3. Get current holdings
+        current = get_current_holdings(kite)
+        print(f"Current holdings: {len(current)} stocks")
+        if current:
+            for sym, qty in sorted(current.items()):
+                print(f"  {sym}: {qty}")
+    else:
+        # In dry-run, use DB positions as current holdings
+        open_positions = db_mod.get_open_positions()
+        current = {p["ticker"]: p["qty"] for p in open_positions}
+        print(f"\nDry-run: {len(current)} open positions from DB")
 
     # 4. Compute trades
     print(f"\nTarget: {len(target_symbols)} stocks" if target_symbols else "\nTarget: CASH")

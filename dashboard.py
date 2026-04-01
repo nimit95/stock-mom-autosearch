@@ -13,6 +13,7 @@ from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import database as db
+from strategy import REGIME_MA
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
@@ -65,6 +66,23 @@ def generate_html():
     monthly = db.get_monthly_pnl()
 
     last_reb = stats.get("last_rebalance") or {}
+
+    # Strategy signal row
+    if last_reb:
+        regime_class = "profit" if last_reb.get("regime") == "bullish" else "loss"
+        status_class = "invested" if last_reb.get("status") == "invested" else "cash-status"
+        nifty_val = f"{last_reb.get('nifty_value', 0):.3f}" if last_reb.get("nifty_value") else "N/A"
+        nifty_ma = f"{last_reb.get('nifty_ma', 0):.3f}" if last_reb.get("nifty_ma") else "N/A"
+        signal_row = f"""<tr>
+            <td><b>{last_reb.get('date', 'N/A')[:10]}</b></td>
+            <td class="{regime_class}"><b>{last_reb.get('regime', '').upper()}</b></td>
+            <td>{nifty_val}</td>
+            <td>{nifty_ma}</td>
+            <td class="{status_class}"><b>{last_reb.get('status', '').upper()}</b></td>
+            <td>{last_reb.get('num_stocks', 0)}</td>
+        </tr>"""
+    else:
+        signal_row = '<tr><td colspan="6" style="text-align:center;color:#484f58">No rebalance run yet</td></tr>'
 
     # Open positions table
     open_rows = ""
@@ -184,6 +202,12 @@ def generate_html():
     <div class="stat"><div class="value">{stats.get('total_rebalances', 0)}</div><div class="label">Rebalances</div></div>
     <div class="stat"><div class="value">₹{stats.get('avg_pnl', 0):+,.0f}</div><div class="label">Avg P&L / Trade</div></div>
 </div>
+
+<h2>Strategy Signal</h2>
+<table>
+    <tr><th>Date</th><th>Regime</th><th>Nifty</th><th>{REGIME_MA} DMA</th><th>Status</th><th>Stocks Qualifying</th></tr>
+    {signal_row}
+</table>
 
 <h2>Open Positions</h2>
 <table>
