@@ -19,12 +19,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     PREFIX = "/india"
 
     def do_GET(self):
-        path = self.path
+        path = self.path.split("?")[0]  # strip query params
         # Strip prefix for routing
         if path.startswith(self.PREFIX):
             path = path[len(self.PREFIX):] or "/"
 
-        if path == "/" or path == "/dashboard":
+        if path == "/" or path == "/dashboard" or path == "":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
