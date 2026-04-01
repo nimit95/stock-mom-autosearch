@@ -33,7 +33,7 @@ from strategy import (
 # ── Config ─────────────────────────────────────────────────────
 ENV_FILE = Path(__file__).parent / ".env"
 TOKEN_FILE = Path(__file__).parent / ".kite_token"
-DEFAULT_PORTFOLIO = 1_000_000  # 10 lakh
+INITIAL_CAPITAL = 500_000  # 5 lakh
 
 EXCHANGE = "NSE"
 PRODUCT = "CNC"      # delivery
@@ -97,11 +97,13 @@ def get_current_holdings(kite):
     return current
 
 
-def get_strategy_picks(send_telegram=True):
+def get_strategy_picks(send_telegram=True, portfolio_value=None):
     """Run momentum strategy, return list of NSE symbols or empty (cash)."""
     import pandas as pd
     import numpy as np
     import telegram_bot
+
+    pv = portfolio_value or INITIAL_CAPITAL
 
     data = load_data()
     indicators = precompute_indicators(data)
@@ -126,7 +128,7 @@ def get_strategy_picks(send_telegram=True):
                          float(bench_cum.loc[latest]), float(bench_ma.loc[latest]))
         if send_telegram:
             telegram_bot.send_rebalance_alert(
-                latest, False, [], indicators, get_sector)
+                latest, False, [], indicators, get_sector, portfolio_value=pv)
         return []
 
     picks = screen_stocks(indicators, latest)
@@ -134,7 +136,7 @@ def get_strategy_picks(send_telegram=True):
     # Send Telegram alert
     if send_telegram:
         telegram_bot.send_rebalance_alert(
-            latest, True, picks, indicators, get_sector)
+            latest, True, picks, indicators, get_sector, portfolio_value=pv)
 
     if len(picks) < MIN_STOCKS:
         print(f"Only {len(picks)} stocks qualify (need {MIN_STOCKS}). Go to cash.")
@@ -317,8 +319,8 @@ def main():
     parser = argparse.ArgumentParser(description="Weekly momentum rebalance via Kite")
     parser.add_argument("--login", action="store_true", help="Login and get access token")
     parser.add_argument("--dry-run", action="store_true", help="Show trades without executing")
-    parser.add_argument("--portfolio", type=float, default=DEFAULT_PORTFOLIO,
-                        help="Portfolio size in Rs (default: 10,00,000)")
+    parser.add_argument("--portfolio", type=float, default=None,
+                        help="Override portfolio size in Rs (default: auto from DB)")
     args = parser.parse_args()
 
     if args.login:
@@ -328,17 +330,22 @@ def main():
     import database as db_mod
     import telegram_bot
 
-    # 1. Get strategy picks
-    print("Running momentum strategy...")
-    target_symbols = get_strategy_picks()
+    # 1. Compute portfolio value (reinvest profits)
+    pv = db_mod.get_portfolio_value(INITIAL_CAPITAL)
+    portfolio_value = args.portfolio or pv["total"]
+    print(f"Portfolio: ₹{portfolio_value:,.0f} (initial ₹{INITIAL_CAPITAL:,.0f} + P&L ₹{pv['realized_pnl']:+,.0f})")
+    print(f"  Available: ₹{pv['available']:,.0f}  Invested: ₹{pv['invested']:,.0f}")
 
-    # 2. Connect to Kite (skip in dry-run if no token)
+    # 2. Get strategy picks
+    print("\nRunning momentum strategy...")
+    target_symbols = get_strategy_picks(portfolio_value=portfolio_value)
+
+    # 3. Connect to Kite (skip in dry-run if no token)
     kite = None
     current = {}
     if not args.dry_run:
         print("\nConnecting to Kite...")
         kite = get_kite()
-        # 3. Get current holdings
         current = get_current_holdings(kite)
         print(f"Current holdings: {len(current)} stocks")
         if current:
@@ -350,9 +357,9 @@ def main():
         current = {p["ticker"]: p["qty"] for p in open_positions}
         print(f"\nDry-run: {len(current)} open positions from DB")
 
-    # 4. Compute trades
+    # 5. Compute trades
     print(f"\nTarget: {len(target_symbols)} stocks" if target_symbols else "\nTarget: CASH")
-    orders = compute_trades(current, target_symbols, args.portfolio, kite)
+    orders = compute_trades(current, target_symbols, portfolio_value, kite)
 
     # 5. Execute
     execute_orders(kite, orders, dry_run=args.dry_run)
@@ -373,6 +380,7 @@ def main():
         status_lines.append("Open positions: 0 (CASH)")
 
     status_lines.append("")
+    status_lines.append(f"Portfolio: ₹{portfolio_value:,.0f}")
     status_lines.append(f"Closed trades: {stats['closed_positions']}")
     status_lines.append(f"Win rate: {stats['win_rate']}%")
     status_lines.append(f"Total P&L: ₹{stats['total_pnl']:+,.0f}")

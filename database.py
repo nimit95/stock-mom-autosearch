@@ -221,6 +221,27 @@ def get_trading_stats():
     return stats
 
 
+def get_portfolio_value(initial_capital):
+    """Compute current portfolio value: initial capital + realized P&L."""
+    conn = get_db()
+    # Total realized P&L from closed positions
+    row = conn.execute(
+        "SELECT COALESCE(SUM(profit_amount), 0) as total FROM positions WHERE status='closed'"
+    ).fetchone()
+    realized_pnl = row["total"]
+
+    # Capital currently in open positions
+    row = conn.execute(
+        "SELECT COALESCE(SUM(capital), 0) as total FROM positions WHERE status='open'"
+    ).fetchone()
+    invested = row["total"]
+
+    conn.close()
+    total = initial_capital + realized_pnl
+    available = total - invested
+    return {"total": total, "available": available, "invested": invested, "realized_pnl": realized_pnl}
+
+
 def get_recent_trades(limit=50):
     conn = get_db()
     rows = conn.execute(
