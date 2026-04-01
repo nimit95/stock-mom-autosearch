@@ -86,6 +86,13 @@ def init_db():
 
 def log_rebalance(date, regime, num_stocks, status, nifty_value=None, nifty_ma=None):
     conn = get_db()
+    # Skip if already logged for this date
+    existing = conn.execute(
+        "SELECT id FROM rebalances WHERE date=?", (str(date),)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return existing["id"]
     cur = conn.execute(
         "INSERT INTO rebalances (date, regime, num_stocks, status, nifty_value, nifty_ma) "
         "VALUES (?, ?, ?, ?, ?, ?)",
